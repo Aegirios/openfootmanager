@@ -43,18 +43,18 @@ expect() {
     expect_at "$1" "$fixtures/$2/workflows" "$fixtures/$2/rust-toolchain.toml" "$3"
 }
 
-# The two oversized cases are generated rather than committed, because what they test is a size:
-# the offending line must be followed by more than a pipe buffer's worth of anything at all, and
-# a 300 KB fixture checked into the repository would be a strange thing to meet while reading
-# this directory. `<body>` is written once and padded here.
-#
-# What they hold shut: `grep -q` stops at its first match, whatever is feeding it takes SIGPIPE,
-# and `pipefail` then calls the pipeline failed. Every match test in the script under test reads
-# that inverted status as "no match" and skips the file. Both of these pass against the version
-# of the script on `develop`.
-oversized_scratch="$(mktemp -d)"
-trap 'rm -rf "$oversized_scratch"' EXIT
+# Three cases are generated rather than committed, because what each one tests is a property of
+# the *bytes* rather than of the text — a size, or a line ending — and a checked-in file cannot
+# be relied on to keep either. Each generator says which.
+generated_scratch="$(mktemp -d)"
+trap 'rm -rf "$generated_scratch"' EXIT
 
+# What these two hold shut: `grep -q` stops at its first match, whatever is feeding it takes
+# SIGPIPE, and `pipefail` then calls the pipeline failed. Every match test in the script under
+# test reads that inverted status as "no match" and skips the file. The offending line therefore
+# has to be followed by more than a pipe buffer's worth of anything at all, and a 300 KB fixture
+# checked into this directory would be a strange thing to meet. Both pass against `develop`.
+#
 # oversized <name> <body>  ->  echoes the workflow directory
 oversized() {
     # Three statements, not one `local`: bash expands the whole command line before `local` runs,
@@ -64,7 +64,7 @@ oversized() {
     # pass, in the suite whose whole job is to not have those.
     local name="$1"
     local body="$2"
-    local dir="$oversized_scratch/$name"
+    local dir="$generated_scratch/$name"
 
     mkdir -p "$dir/workflows"
     printf '[toolchain]\nchannel = "1.95.0"\n' > "$dir/rust-toolchain.toml"
@@ -77,6 +77,28 @@ oversized() {
             printf '      - run: echo padding-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
         done
     } > "$dir/workflows/$name.yml"
+
+    printf '%s' "$dir"
+}
+
+# Generated for a different reason than the oversized pair: a CRLF fixture cannot safely be
+# committed. There is no `.gitattributes` here today, so the file's line endings depend on
+# whoever checks it out — and the day one is added, or someone's `core.autocrlf` normalises it,
+# the fixture quietly becomes a duplicate of an LF case that passes for the wrong reason. Writing
+# the CRs here means the bytes under test are the bytes intended.
+#
+# crlf <name> <body>  ->  echoes the workflow directory
+crlf() {
+    local name="$1"
+    local body="$2"
+    local dir="$generated_scratch/$name"
+
+    mkdir -p "$dir/workflows"
+    printf '[toolchain]\nchannel = "1.95.0"\n' > "$dir/rust-toolchain.toml"
+    {
+        printf 'name: %s\non: [workflow_dispatch]\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n' "$name"
+        printf '%s\n' "$body"
+    } | sed 's/$/\r/' > "$dir/workflows/$name.yml"
 
     printf '%s' "$dir"
 }
@@ -124,6 +146,13 @@ oversized_plus="$(oversized oversized-plus '      - uses: dtolnay/rust-toolchain
             +nightly build')"
 expect_at 1 "$oversized_plus/workflows" "$oversized_plus/rust-toolchain.toml" \
     "the same, on the continuation pass, where the skip is silent and there is no second detector"
+
+crlf_build="$(crlf crlf-continuation '      - uses: actions/checkout@v4
+      - run: |
+          cargo \
+            build --release')"
+expect_at 1 "$crlf_build/workflows" "$crlf_build/rust-toolchain.toml" \
+    "a continuation in a CRLF workflow, where the backslash is no longer the last character"
 
 echo ""
 if [ "$failed" -ne 0 ]; then

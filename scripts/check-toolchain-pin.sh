@@ -77,8 +77,17 @@ done < <(grep -rn "dtolnay/rust-toolchain@" "$workflow_dir" || true)
 # Rust build that no per-line pattern can see — the first line ends at the backslash and the
 # second never says `cargo`. Joining the continuations first is what makes the rules read the
 # commands that actually run rather than the lines they happen to be typed on.
+#
+# Carriage returns come off first, in their own pass. A continuation in a CRLF workflow ends
+# `\` CR LF, so the backslash is no longer last and the join silently does not happen — the rule
+# then reads two harmless lines instead of one `cargo build`. There is no `.gitattributes` in
+# this repository, so nothing stops a CRLF file being committed. Stripping inside the join loop
+# would not do: after `N` the appended line still carries its own CR.
+#
+# Piping sed into sed is safe in a way piping into `grep -q` is not — sed reads its input to the
+# end, so there is no early exit and nothing takes SIGPIPE.
 unwrap_continuations() {
-    sed -e :a -e '/\\$/N; s/\\\n//; ta'
+    sed 's/\r$//' | sed -e :a -e '/\\$/N; s/\\\n//; ta'
 }
 
 # ── 2. Nothing overrides the toolchain on the cargo command line ──────────────────────────────
