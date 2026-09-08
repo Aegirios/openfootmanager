@@ -96,10 +96,17 @@ paying attention.
 Do not instead count pronouns across the whole file and follow the majority. Those counts are
 dominated by third-person text *about* players rather than text *to* the manager, and the markers
 are ambiguous in both directions. Spanish `su` is "his" far more often than polite "your". And a
-capital `Sie` only means formal "you" mid-sentence — at the start of one, where German
-capitalises regardless, `de.json` uses it just as often for "they" (*Sie wollen mehr* — the
-selling club) and for "it" (*Die Paket-ID … Sie darf nicht leer sein*, agreeing with the
-feminine noun).
+capital `Sie` only means formal "you" mid-sentence — at the start of one, where German capitalises
+regardless, `de.json` also uses it for "they" and for "it". One string carries the whole problem:
+
+```
+transfers.transferFeedbackCounterHeadline
+  "Sie wollen mehr, bevor sie einschlagen."   // They want more before shaking hands.
+```
+
+Both pronouns are the same word meaning the same thing — the club on the other side of the deal.
+Only sentence position capitalises the first. A grep for `Sie` counts one of them as formal
+address and misses the other entirely.
 
 Register follows **who is speaking**, which is why one file can hold both forms correctly. In
 `de.json`, a journalist's question under `match.press.*` is formal (`Sie`, throughout); a menu
