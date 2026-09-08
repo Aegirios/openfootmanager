@@ -19,12 +19,12 @@ fixtures="$here/tests/toolchain-pin"
 passed=0
 failed=0
 
-# expect <expected exit status> <fixture> <what this proves>
-expect() {
-    local want="$1" fixture="$2" description="$3"
+# expect_at <expected exit status> <workflow dir> <toolchain file> <what this proves>
+expect_at() {
+    local want="$1" workflows="$2" toolchain="$3" description="$4"
     local output status
 
-    output="$("$script" "$fixtures/$fixture/workflows" "$fixtures/$fixture/rust-toolchain.toml" 2>&1)"
+    output="$("$script" "$workflows" "$toolchain" 2>&1)"
     status=$?
 
     if [ "$status" -eq "$want" ]; then
@@ -36,6 +36,49 @@ expect() {
         printf '        expected exit %s, got %s. Output was:\n' "$want" "$status"
         printf '        %s\n' "$output"
     fi
+}
+
+# expect <expected exit status> <fixture> <what this proves>
+expect() {
+    expect_at "$1" "$fixtures/$2/workflows" "$fixtures/$2/rust-toolchain.toml" "$3"
+}
+
+# The two oversized cases are generated rather than committed, because what they test is a size:
+# the offending line must be followed by more than a pipe buffer's worth of anything at all, and
+# a 300 KB fixture checked into the repository would be a strange thing to meet while reading
+# this directory. `<body>` is written once and padded here.
+#
+# What they hold shut: `grep -q` stops at its first match, whatever is feeding it takes SIGPIPE,
+# and `pipefail` then calls the pipeline failed. Every match test in the script under test reads
+# that inverted status as "no match" and skips the file. Both of these pass against the version
+# of the script on `develop`.
+oversized_scratch="$(mktemp -d)"
+trap 'rm -rf "$oversized_scratch"' EXIT
+
+# oversized <name> <body>  ->  echoes the workflow directory
+oversized() {
+    # Three statements, not one `local`: bash expands the whole command line before `local` runs,
+    # so a `dir="…/$name"` on the same line reads the *global* `name` and trips `set -u`. That
+    # aborted the command substitution, `expect_at` was handed an empty path, and the script under
+    # test failed on the missing directory — exit 1, which is what these two cases expect. A false
+    # pass, in the suite whose whole job is to not have those.
+    local name="$1"
+    local body="$2"
+    local dir="$oversized_scratch/$name"
+
+    mkdir -p "$dir/workflows"
+    printf '[toolchain]\nchannel = "1.95.0"\n' > "$dir/rust-toolchain.toml"
+    {
+        printf 'name: %s\non: [workflow_dispatch]\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n' "$name"
+        printf '%s\n' "$body"
+        # Comfortably past the 64 KB pipe buffer, so the feeding process is still writing when
+        # grep finds the match above and leaves.
+        for _ in $(seq 4000); do
+            printf '      - run: echo padding-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+        done
+    } > "$dir/workflows/$name.yml"
+
+    printf '%s' "$dir"
 }
 
 echo "check-toolchain-pin.test: accepted repositories"
@@ -69,6 +112,18 @@ expect 1 plus-toolchain-across-a-continuation \
     "cargo +nightly split over a continuation, in a workflow that is otherwise correctly pinned"
 expect 1 plus-toolchain-behind-a-comment \
     "a split cargo +nightly in a workflow whose comments also mention it, which used to shadow the real one"
+
+oversized_build="$(oversized oversized-build '      - uses: actions/checkout@v4
+      - run: cargo build --release')"
+expect_at 1 "$oversized_build/workflows" "$oversized_build/rust-toolchain.toml" \
+    "an unpinned cargo build in a workflow too large to fit the pipe buffer, which grep -q used to hide"
+
+oversized_plus="$(oversized oversized-plus '      - uses: dtolnay/rust-toolchain@1.95.0
+      - run: |
+          cargo \
+            +nightly build')"
+expect_at 1 "$oversized_plus/workflows" "$oversized_plus/rust-toolchain.toml" \
+    "the same, on the continuation pass, where the skip is silent and there is no second detector"
 
 echo ""
 if [ "$failed" -ne 0 ]; then

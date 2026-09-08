@@ -23,6 +23,15 @@
 
 set -euo pipefail
 
+# ⚠ Never pipe into `grep -q`, here or anywhere below. `grep -q` exits the moment it matches, the
+# process feeding it takes SIGPIPE, and `pipefail` then reports the *pipeline* as failed even
+# though the pattern was found. Every match test in this script is spelled `|| continue` or
+# `&& continue`, so that inverted status silently skips the file — a real unpinned `cargo build`
+# in a workflow larger than the 64 KB pipe buffer was accepted for exactly this reason, on the
+# rule this script mainly exists to enforce. Buffer into a variable and use a here-string, which
+# has no upstream process to kill. Fixtures `oversized-*` are generated at test time and hold
+# this shut.
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow_dir="${1:-$repo_root/.github/workflows}"
 toolchain_file="${2:-$repo_root/rust-toolchain.toml}"
@@ -87,7 +96,7 @@ while IFS= read -r line; do
     # demand a pin from a workflow whose only offence was *documenting* the spelling nobody may
     # use. Found the hard way — a new fixture was rejected for its own explanatory header rather
     # than for the command it existed to test, which made it prove nothing.
-    printf '%s\n' "$content" | grep -q '^[[:space:]]*#' && continue
+    grep -q '^[[:space:]]*#' <<<"$content" && continue
 
     echo "$(relative "$file"):$lineno: uses \`cargo +<toolchain>\`, which overrides $(relative "$toolchain_file")" >&2
     status=1
@@ -110,8 +119,10 @@ for workflow in "$workflow_dir"/*.yml "$workflow_dir"/*.yaml; do
 
     code="$(grep -v '^[[:space:]]*#' "$workflow" || true)"
 
-    printf '%s\n' "$code" | grep -qE '(^|[^[:alnum:]_-])cargo[[:space:]]+\+' && continue
-    printf '%s\n' "$code" | unwrap_continuations | grep -qE '(^|[^[:alnum:]_-])cargo[[:space:]]+\+' || continue
+    joined="$(unwrap_continuations <<<"$code")"
+
+    grep -qE '(^|[^[:alnum:]_-])cargo[[:space:]]+\+' <<<"$code" && continue
+    grep -qE '(^|[^[:alnum:]_-])cargo[[:space:]]+\+' <<<"$joined" || continue
 
     echo "$(relative "$workflow"): uses \`cargo +<toolchain>\` across a line continuation, which overrides $(relative "$toolchain_file")" >&2
     status=1
@@ -145,20 +156,25 @@ builds_rust='(^|[^[:alnum:]_-])cargo[[:space:]]+[+a-z]|uses:[[:space:]]*tauri-ap
 # captured and put back so two exempt calls on one line still both blank.
 #
 # A token can end on something other than a space, which is why the trailing class carries the
-# shell separators too. `cargo deny; cargo machete src-tauri` went unblanked and was reported as
-# an unpinned Rust build — a false alarm, and that is not the harmless direction: it is how a
-# gate earns a reputation for noise and gets switched off. `-` is deliberately *not* in the
-# class; adding it is exactly the `cargo deny-audit` hole again.
+# shell separators and the redirections too. `cargo deny; …` and `cargo deny>deny.log` both went
+# unblanked and were reported as unpinned Rust builds — false alarms, and that is not the
+# harmless direction: it is how a gate earns a reputation for noise and gets switched off.
+#
+# `-` is deliberately *not* in the class. Putting it there is exactly the `cargo deny-audit` hole
+# again, so the two failure directions pull against each other and this class is where they meet:
+# everything that can *end* a shell word, and nothing that can continue one.
 strip_non_builders() {
     grep -v '^[[:space:]]*#' "$1" |
         unwrap_continuations |
-        sed -E 's/(^|[^[:alnum:]_-])cargo[[:space:]]+(deny|machete)([[:space:];&|)]|$)/\1cargo-\2\3/g'
+        sed -E 's/(^|[^[:alnum:]_-])cargo[[:space:]]+(deny|machete)([[:space:];&|)<>]|$)/\1cargo-\2\3/g'
 }
 
 for workflow in "$workflow_dir"/*.yml "$workflow_dir"/*.yaml; do
     [ -e "$workflow" ] || continue
 
-    strip_non_builders "$workflow" | grep -qE "$builds_rust" || continue
+    commands="$(strip_non_builders "$workflow")"
+
+    grep -qE "$builds_rust" <<<"$commands" || continue
     grep -q "dtolnay/rust-toolchain@" "$workflow" && continue
 
     echo "$(relative "$workflow"): builds Rust but never installs the toolchain through dtolnay/rust-toolchain@$channel" >&2

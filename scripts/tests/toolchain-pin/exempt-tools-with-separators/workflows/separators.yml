@@ -14,3 +14,5 @@ jobs:
       - run: cargo machete; echo done
       - run: (cargo deny) && (cargo machete src-tauri)
       - run: cargo deny check licenses | tee licences.log
+      - run: cargo deny>deny.log
+      - run: cargo machete>machete.log 2>&1
