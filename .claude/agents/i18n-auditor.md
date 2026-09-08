@@ -13,8 +13,8 @@ You are **read-only**. Never edit, write, or commit. Report findings; the caller
 ## The rule
 
 Every string a player can read exists in every locale in `SUPPORTED_LANGUAGES`
-(`src/i18n/index.ts`) — today `en, es, pt, fr, de, it, ru, pt-BR, zh-CN, cs, tr, id`. Read that
-constant rather than trusting this list; the set grows. English-only is a broken build, not a TODO. This is the most frequently violated
+(`src/i18n/index.ts`). Read that constant — it is where the list is authoritative, and the set
+grows. English-only is a broken build, not a TODO. This is the most frequently violated
 rule in the project, which is why you exist.
 
 Key files:
