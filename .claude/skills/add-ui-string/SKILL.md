@@ -99,7 +99,7 @@ are ambiguous in both directions. Spanish `su` is "his" far more often than poli
 capital `Sie` only means formal "you" mid-sentence — at the start of one, where German capitalises
 regardless, `de.json` also uses it for "they" and for "it". One string carries the whole problem:
 
-```
+```text
 transfers.transferFeedbackCounterHeadline
   "Sie wollen mehr, bevor sie einschlagen."   // They want more before shaking hands.
 ```
