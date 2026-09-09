@@ -140,7 +140,7 @@ fn write_game_to_connection(
     team_repo::upsert_teams(conn, &game.teams)?;
     player_repo::upsert_players(conn, &game.players)?;
     staff_repo::replace_staff_list(conn, &game.staff)?;
-    message_repo::upsert_messages(conn, &game.messages)?;
+    message_repo::replace_messages(conn, &game.messages)?;
     news_repo::upsert_news_list(conn, &game.news)?;
 
     if let Some(ref league) = game.league {
@@ -553,6 +553,40 @@ mod tests {
             loaded.available_staff_market_last_activity_date.as_deref(),
             Some("2032-07-18")
         );
+    }
+
+    fn sample_message(id: &str) -> domain::message::InboxMessage {
+        domain::message::InboxMessage::new(
+            id.to_string(),
+            "Subject".to_string(),
+            "Body".to_string(),
+            "Board".to_string(),
+            "2032-07-18".to_string(),
+        )
+    }
+
+    /// Saving re-writes an existing database rather than a fresh one, so a message the player
+    /// deleted has to be *removed* from the table, not merely left un-upserted. Writing into a
+    /// fresh database would pass even while the bug was live — the second write must land on the
+    /// same connection for this to bite.
+    #[test]
+    fn deleted_messages_stay_deleted_when_the_same_database_is_written_again() {
+        let db = GameDatabase::open_in_memory().unwrap();
+        let mut game = sample_game_with_clock(2032, 18);
+        game.messages = vec![sample_message("msg-1"), sample_message("msg-2")];
+
+        GamePersistenceWriter::write_game(&db, &game, "save-1", "Career").unwrap();
+
+        game.messages.retain(|message| message.id == "msg-1");
+        GamePersistenceWriter::write_game(&db, &game, "save-1", "Career").unwrap();
+
+        let loaded = GamePersistenceReader::read_game(&db).unwrap();
+        let ids: Vec<&str> = loaded
+            .messages
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["msg-1"]);
     }
 
     #[test]

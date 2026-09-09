@@ -56,6 +56,20 @@ pub fn upsert_messages(conn: &Connection, messages: &[InboxMessage]) -> Result<(
     Ok(())
 }
 
+/// Replace the whole inbox with `messages`.
+///
+/// Upserting alone cannot express a deletion: a save re-writes an existing database, so a message
+/// the player deleted would simply be left behind and reappear on the next load. Callers holding
+/// the authoritative message list want this; `upsert_messages` remains for partial writes.
+///
+/// Both statements run on the caller's connection, which `save_game` wraps in a transaction, so an
+/// interrupted save cannot leave the inbox empty.
+pub fn replace_messages(conn: &Connection, messages: &[InboxMessage]) -> Result<(), String> {
+    conn.execute("DELETE FROM messages", [])
+        .map_err(|_| GAME_PERSISTENCE_WRITE_ERROR.to_string())?;
+    upsert_messages(conn, messages)
+}
+
 fn parse_category(s: &str) -> MessageCategory {
     match s {
         "Welcome" => MessageCategory::Welcome,
@@ -198,6 +212,36 @@ mod tests {
         upsert_messages(db.conn(), &msgs).unwrap();
         let all = load_all_messages(db.conn()).unwrap();
         assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_replace_messages_drops_rows_that_are_no_longer_present() {
+        let db = test_db();
+        upsert_messages(
+            db.conn(),
+            &[
+                sample_message("msg-001"),
+                sample_message("msg-002"),
+                sample_message("msg-003"),
+            ],
+        )
+        .unwrap();
+
+        replace_messages(db.conn(), &[sample_message("msg-002")]).unwrap();
+
+        let all = load_all_messages(db.conn()).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, "msg-002");
+    }
+
+    #[test]
+    fn test_replace_messages_with_empty_list_clears_the_inbox() {
+        let db = test_db();
+        upsert_messages(db.conn(), &[sample_message("msg-001")]).unwrap();
+
+        replace_messages(db.conn(), &[]).unwrap();
+
+        assert!(load_all_messages(db.conn()).unwrap().is_empty());
     }
 
     #[test]
