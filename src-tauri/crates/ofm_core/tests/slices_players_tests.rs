@@ -465,3 +465,33 @@ fn pagination_beyond_total_returns_empty_items() {
     assert_eq!(page.total, 1);
     assert!(page.items.is_empty());
 }
+
+#[test]
+fn projection_carries_the_authored_photo_from_a_package() {
+    // A photo shipped in an `.ofm` reaches the player as a package-qualified
+    // `media.face`. The players table is the one avatar surface fed by this
+    // projection rather than by the full player, so dropping the field here
+    // shows every packaged player a placeholder.
+    let mut player = PlayerSpec::new("p1", "Pele", Some("t1")).build();
+    player.media.face = Some("brazil-1962/assets/images/pele.png".to_string());
+    let game = make_game(vec![make_team("t1", "Santos")], vec![player]);
+
+    let page = query_page(&game, &baseline_query());
+
+    assert_eq!(
+        page.items[0].media.face.as_deref(),
+        Some("brazil-1962/assets/images/pele.png"),
+    );
+}
+
+#[test]
+fn projection_leaves_the_photo_empty_for_a_generated_player() {
+    let game = make_game(
+        vec![make_team("t1", "Santos")],
+        vec![PlayerSpec::new("p1", "Nobody", Some("t1")).build()],
+    );
+
+    let page = query_page(&game, &baseline_query());
+
+    assert_eq!(page.items[0].media.face, None);
+}

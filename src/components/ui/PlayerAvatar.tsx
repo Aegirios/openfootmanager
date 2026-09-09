@@ -13,7 +13,7 @@ interface PlayerAvatarPlayer extends PlayerPortraitIdentity {
   full_name: string;
   match_name: string;
   media?: {
-    face?: string;
+    face?: string | null;
   };
 }
 
