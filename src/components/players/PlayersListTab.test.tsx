@@ -13,12 +13,20 @@ import type {
   PlayersPage,
   PlayersPageQuery,
 } from "../../services/playersService";
+import { resetPackageAssetRoot } from "../../hooks/usePackageAssetSrc";
 import PlayersListTab from "./PlayersListTab";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  convertFileSrc: vi.fn((path: string) => path),
+  convertFileSrc: vi.fn((path: string) => `asset://localhost/${path}`),
   invoke: vi.fn(),
   isTauri: vi.fn(() => false),
+}));
+
+// Package artwork resolves through the asset protocol, which needs the app data
+// directory. Without this the hook's catch treats every packaged photo as
+// missing and the rows fall back to generated avatars.
+vi.mock("@tauri-apps/api/path", () => ({
+  appDataDir: vi.fn(async () => "/home/u/.local/share/ofm"),
 }));
 
 vi.mock("../../utils/backendI18n", () => ({
@@ -290,6 +298,7 @@ function summaryFrom(player: PlayerData, teams: TeamData[]): PlayerSummary {
     loan_listed: player.loan_listed,
     injured: player.injury != null,
     retired: player.retired ?? false,
+    media: { face: player.media?.face ?? null },
   };
 }
 
@@ -354,6 +363,9 @@ function setupSliceMock(
 describe("PlayersListTab", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
+    // The resolved app data dir is cached for the module's lifetime, so it
+    // would otherwise leak across tests.
+    resetPackageAssetRoot();
   });
 
   it("filters by search and position before selecting a player", async () => {
@@ -432,6 +444,37 @@ describe("PlayersListTab", () => {
     );
 
     expect(await screen.findByText("Free Agent")).toBeInTheDocument();
+  });
+
+  it("renders a player photo shipped in an installed package", async () => {
+    const gameState: GameStateData = {
+      ...createGameState(),
+      players: [
+        createPlayer({
+          id: "player-packaged",
+          full_name: "Packaged Player",
+          match_name: "P. Player",
+          media: { face: "brazil-1962/assets/images/pele.png" },
+        }),
+      ],
+    };
+    setupSliceMock(gameState);
+
+    render(
+      <PlayersListTab
+        gameState={gameState}
+        onSelectPlayer={vi.fn()}
+        onSelectTeam={vi.fn()}
+      />,
+    );
+
+    // A package-qualified path resolves a tick after mount, so the row shows a
+    // generated avatar first.
+    const photo = await screen.findByRole("img", { name: "Packaged Player" });
+    expect(photo).toHaveAttribute(
+      "src",
+      "asset://localhost//home/u/.local/share/ofm/package-assets/brazil-1962/assets/images/pele.png",
+    );
   });
 
   it("offers context-menu actions for team navigation and scouting", async () => {

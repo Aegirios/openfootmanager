@@ -52,6 +52,18 @@ pub struct PlayerSummary {
     pub loan_listed: bool,
     pub injured: bool,
     pub retired: bool,
+    pub media: PlayerSummaryMedia,
+}
+
+/// Artwork paths for a row in the players table.
+///
+/// Kept separate from `domain::player::PlayerMedia` so the wire shape belongs to
+/// this projection: the domain type skips `face` when it is empty, which would
+/// leave the key absent rather than null. Mirrors `TeamCardMedia` in the teams
+/// slice.
+#[derive(Debug, Default, Serialize, PartialEq, Eq)]
+pub struct PlayerSummaryMedia {
+    pub face: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -185,6 +197,9 @@ fn project_summary(player: &Player, teams: &TeamLookup) -> PlayerSummary {
         loan_listed: player.loan_listed,
         injured: player.injury.is_some(),
         retired: player.retired,
+        media: PlayerSummaryMedia {
+            face: player.media.face.clone(),
+        },
     }
 }
 

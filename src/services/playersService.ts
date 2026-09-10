@@ -21,6 +21,10 @@ export interface PlayersPageQuery {
   page_size: number;
 }
 
+export interface PlayerSummaryMedia {
+  face: string | null;
+}
+
 export interface PlayerSummary {
   id: string;
   full_name: string;
@@ -37,6 +41,7 @@ export interface PlayerSummary {
   loan_listed: boolean;
   injured: boolean;
   retired: boolean;
+  media: PlayerSummaryMedia;
 }
 
 export interface PlayersPage {
