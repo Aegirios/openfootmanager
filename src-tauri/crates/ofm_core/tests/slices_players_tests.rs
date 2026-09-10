@@ -485,6 +485,24 @@ fn projection_carries_the_authored_photo_from_a_package() {
 }
 
 #[test]
+fn serialized_photo_matches_the_shape_the_frontend_parses() {
+    // `PlayerSummary` in playersService.ts is a hand-written mirror of this
+    // struct, so the wire key names are the contract. A rename here would show
+    // up as placeholder avatars, not as a build failure.
+    let mut player = PlayerSpec::new("p1", "Pele", Some("t1")).build();
+    player.media.face = Some("brazil-1962/assets/images/pele.png".to_string());
+    let game = make_game(vec![make_team("t1", "Santos")], vec![player]);
+
+    let page = query_page(&game, &baseline_query());
+    let json = serde_json::to_value(&page.items[0]).expect("summary serializes");
+
+    assert_eq!(
+        json["media"]["face"],
+        serde_json::json!("brazil-1962/assets/images/pele.png"),
+    );
+}
+
+#[test]
 fn projection_leaves_the_photo_empty_for_a_generated_player() {
     let game = make_game(
         vec![make_team("t1", "Santos")],
